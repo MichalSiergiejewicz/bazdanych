@@ -4,113 +4,114 @@ import pandas as pd
 import altair as alt
 
 # --- KONFIGURACJA POŁĄCZENIA ---
-# Dane pobierane z st.secrets w Streamlit Cloud
-# Upewnij się, że w Settings -> Secrets masz SUPABASE_URL i SUPABASE_KEY
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
-
 supabase: Client = create_client(URL, KEY)
 
-st.set_page_config(page_title="Magazyn Supabase", layout="wide")
-st.title("📊 System Zarządzania Magazynem")
+st.set_page_config(page_title="Magazyn Pro", layout="wide")
 
-# Menu boczne
-menu = ["Produkty & Wykres", "Kategorie"]
+# Funkcja pomocnicza do aktualizacji ilości
+def update_stock(product_id, new_count):
+    if new_count >= 0:
+        supabase.table("produkty").update({"liczba": new_count}).eq("id", product_id).execute()
+        st.rerun()
+
+st.title("🚀 Panel Zarządzania Magazynem")
+
+menu = ["Produkty & Dashboard", "Kategorie"]
 choice = st.sidebar.selectbox("Nawigacja", menu)
 
-# --- 1. SEKCJA KATEGORII ---
+# --- 1. KATEGORIE ---
 if choice == "Kategorie":
     st.header("Zarządzanie Kategoriami")
-    
     with st.expander("➕ Dodaj nową kategorię"):
-        nazwa_kat = st.text_input("Nazwa kategorii")
-        opis_kat = st.text_area("Opis")
-        if st.button("Zapisz kategorię"):
-            if nazwa_kat:
-                supabase.table("kategorie").insert({"nazwa": nazwa_kat, "opis": opis_kat}).execute()
-                st.success("Kategoria dodana!")
-                st.rerun()
-
-    st.subheader("Lista kategorii")
-    kategorie = supabase.table("kategorie").select("*").execute()
-    if kategorie.data:
-        for kat in kategorie.data:
-            col1, col2 = st.columns([4, 1])
-            col1.write(f"**{kat['nazwa']}** — {kat['opis'] or 'Brak opisu'}")
-            if col2.button("Usuń", key=f"kat_{kat['id']}"):
-                supabase.table("kategorie").delete().eq("id", kat["id"]).execute()
-                st.rerun()
-    else:
-        st.info("Brak kategorii.")
-
-# --- 2. SEKCJA PRODUKTÓW I WYKRESU ---
-elif choice == "Produkty & Wykres":
-    st.header("Stan Magazynowy")
+        nazwa_kat = st.text_input("Nazwa")
+        if st.button("Zapisz"):
+            supabase.table("kategorie").insert({"nazwa": nazwa_kat}).execute()
+            st.rerun()
     
-    # Pobranie kategorii do formularza dodawania
-    kat_res = supabase.table("kategorie").select("id, nazwa").execute()
-    kat_opcje = {k["nazwa"]: k["id"] for k in kat_res.data}
+    kat_res = supabase.table("kategorie").select("*").execute()
+    for k in kat_res.data:
+        c1, c2 = st.columns([4, 1])
+        c1.write(f"**{k['nazwa']}**")
+        if c2.button("Usuń", key=f"k_{k['id']}"):
+            supabase.table("kategorie").delete().eq("id", k['id']).execute()
+            st.rerun()
 
-    with st.expander("➕ Dodaj nowy produkt"):
-        if not kat_opcje:
-            st.warning("Najpierw dodaj kategorię w zakładce Kategorie!")
-        else:
-            p_nazwa = st.text_input("Nazwa produktu")
-            p_liczba = st.number_input("Ilość", min_value=0, step=1)
-            p_cena = st.number_input("Cena", min_value=0.0, step=0.01)
-            p_kat = st.selectbox("Kategoria", options=list(kat_opcje.keys()))
-            
-            if st.button("Dodaj produkt"):
-                if p_nazwa:
-                    supabase.table("produkty").insert({
-                        "nazwa": p_nazwa,
-                        "liczba": p_liczba,
-                        "cena": p_cena,
-                        "kategoria_id": kat_opcje[p_kat]
-                    }).execute()
-                    st.success("Produkt dodany!")
+# --- 2. PRODUKTY & DASHBOARD ---
+else:
+    # Pobranie danych
+    res = supabase.table("produkty").select("*, kategorie(nazwa)").execute()
+    df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
+
+    if not df.empty:
+        # --- SEKCJA KPI (STATYSTYKI) ---
+        total_value = (df['liczba'] * df['cena']).sum()
+        low_stock_items = df[df['liczba'] < 30].shape[0]
+        
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Liczba Produktów", len(df))
+        col_b.metric("Wartość Magazynu", f"{total_value:,.2f} PLN")
+        col_c.metric("Niski stan ( < 30 )", low_stock_items, delta=-low_stock_items, delta_color="inverse")
+
+        st.divider()
+
+        # --- WYKRES Z INTELIGENTNYM KOLOREM ---
+        st.subheader("📈 Wizualizacja Stanów")
+        
+        # Dodajemy kolumnę koloru do wykresu
+        df['kolor'] = df['liczba'].apply(lambda x: 'red' if x < 30 else '#1f77b4')
+
+        chart = alt.Chart(df).mark_bar().encode(
+            x=alt.X('nazwa:N', title='Produkt', sort='-y'),
+            y=alt.Y('liczba:Q', title='Sztuki'),
+            color=alt.Color('kolor:N', scale=None), # scale=None pozwala użyć kolorów z kolumny
+            tooltip=['nazwa', 'liczba', 'cena']
+        ).properties(height=350)
+
+        # Czerwona linia progowa
+        line = alt.Chart(pd.DataFrame({'y': [30]})).mark_rule(color='red', strokeDash=[5,5]).encode(y='y:Q')
+        
+        st.altair_chart(chart + line, use_container_width=True)
+
+        st.divider()
+
+        # --- EDYTOWALNA LISTA PRODUKTÓW ---
+        st.subheader("📦 Zarządzanie Ilością")
+        
+        # Formularz dodawania (w expanderze żeby nie zajmował miejsca)
+        with st.expander("➕ Dodaj nowy produkt"):
+            kat_res = supabase.table("kategorie").select("id, nazwa").execute()
+            kat_opcje = {k["nazwa"]: k["id"] for k in kat_res.data}
+            if kat_opcje:
+                n_col1, n_col2, n_col3 = st.columns(3)
+                new_n = n_col1.text_input("Nazwa")
+                new_l = n_col2.number_input("Ilość", min_value=0, value=0)
+                new_c = n_col3.number_input("Cena", min_value=0.0, value=0.0)
+                new_k = st.selectbox("Kategoria", list(kat_opcje.keys()))
+                if st.button("Dodaj Produkt"):
+                    supabase.table("produkty").insert({"nazwa": new_n, "liczba": new_l, "cena": new_c, "kategoria_id": kat_opcje[new_k]}).execute()
                     st.rerun()
 
-    # Pobranie danych do tabeli i wykresu
-    res = supabase.table("produkty").select("*, kategorie(nazwa)").execute()
-    
-    if res.data:
-        df = pd.DataFrame(res.data)
-        
-        # --- WYKRES Z CZERWONĄ LINIĄ ---
-        st.subheader("📈 Wykres dostępności produktów")
-        
-        # 1. Warstwa słupków
-        bars = alt.Chart(df).mark_bar(color='#1f77b4').encode(
-            x=alt.X('nazwa:N', title='Produkt', sort='-y'),
-            y=alt.Y('liczba:Q', title='Ilość w sztukach'),
-            tooltip=['nazwa', 'liczba', 'cena']
-        )
-
-        # 2. Warstwa czerwonej linii progowej (y=30)
-        line = alt.Chart(pd.DataFrame({'y': [30]})).mark_rule(
-            color='red', 
-            strokeWidth=2, 
-            strokeDash=[5, 5]
-        ).encode(y='y:Q')
-
-        # 3. Warstwa tekstu "Niski poziom"
-        text = alt.Chart(pd.DataFrame({'y': [30], 't': ['Niski poziom']})).mark_text(
-            align='left', dx=5, dy=-10, color='red', fontWeight='bold'
-        ).encode(y='y:Q', text='t:N')
-
-        # Złożenie wykresu
-        st.altair_chart((bars + line + text).properties(height=400), use_container_width=True)
-        
-        # --- LISTA PRODUKTÓW ---
-        st.subheader("📋 Szczegóły i edycja")
-        for p in res.data:
-            c1, c2, c3 = st.columns([3, 2, 1])
-            kat_name = p.get('kategorie', {}).get('nazwa', 'Brak')
-            c1.write(f"**{p['nazwa']}** (Kat: {kat_name})")
-            c2.write(f"{p['liczba']} szt. | {p['cena']} PLN")
-            if c3.button("Usuń", key=f"prod_{p['id']}"):
-                supabase.table("produkty").delete().eq("id", p["id"]).execute()
-                st.rerun()
+        # Tabela edycji
+        for index, row in df.iterrows():
+            with st.container():
+                c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+                kat_name = row['kategorie']['nazwa'] if row['kategorie'] else "Brak"
+                c1.write(f"**{row['nazwa']}** ({kat_name})")
+                
+                # Przyciski +/- do szybkiej edycji
+                col_minus, col_num, col_plus = c2.columns([1,2,1])
+                if col_minus.button("➖", key=f"min_{row['id']}"):
+                    update_stock(row['id'], row['liczba'] - 1)
+                col_num.write(f"**{row['liczba']}** szt.")
+                if col_plus.button("➕", key=f"plus_{row['id']}"):
+                    update_stock(row['id'], row['liczba'] + 1)
+                
+                c3.write(f"{row['cena']:.2f} PLN")
+                if c4.button("🗑️", key=f"del_{row['id']}"):
+                    supabase.table("produkty").delete().eq("id", row['id']).execute()
+                    st.rerun()
+                st.write("---")
     else:
-        st.info("Brak produktów w bazie.")
+        st.warning("Baza produktów jest pusta. Dodaj kategorie, a potem produkty!")
