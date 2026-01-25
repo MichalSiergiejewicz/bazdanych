@@ -227,4 +227,37 @@ else:
         st.subheader("📈 Stan magazynowy")
         df['kolor'] = df['liczba'].apply(lambda x: 'red' if x < 30 else '#1f77b4')
         chart = alt.Chart(df).mark_bar().encode(
-            x=alt.
+            x=alt.X('nazwa:N', sort='-y'), y='liczba:Q',
+            color=alt.Color('kolor:N', scale=None), tooltip=['nazwa', 'liczba']
+        ).properties(height=350)
+        line = alt.Chart(pd.DataFrame({'y': [30]})).mark_rule(color='red', strokeDash=[5,5]).encode(y='y:Q')
+        st.altair_chart(chart + line, use_container_width=True)
+
+        st.divider()
+        with st.expander("➕ Dodaj produkt"):
+            kat_res = supabase.table("kategorie").select("id, nazwa").execute()
+            kat_opcje = {k["nazwa"]: k["id"] for k in (kat_res.data or [])}
+            if kat_opcje:
+                n1, n2, n3 = st.columns(3)
+                name = n1.text_input("Nazwa")
+                stock = n2.number_input("Ilość", min_value=0)
+                price = n3.number_input("Cena", min_value=0.0)
+                cat = st.selectbox("Kategoria", list(kat_opcje.keys()))
+                if st.button("Dodaj"):
+                    supabase.table("produkty").insert({"nazwa": name, "liczba": stock, "cena": price, "kategoria_id": kat_opcje[cat]}).execute()
+                    st.rerun()
+
+        for _, row in df.iterrows():
+            with st.container():
+                col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                col1.write(f"**{row['nazwa']}**")
+                m, v, p = col2.columns([1,2,1])
+                if m.button("➖", key=f"m_{row['id']}"): update_stock(row['id'], row['liczba']-1)
+                v.write(f"{row['liczba']} szt.")
+                if p.button("➕", key=f"p_{row['id']}"): update_stock(row['id'], row['liczba']+1)
+                col3.write(f"{row['cena']:.2f} zł")
+                if col4.button("🗑️", key=f"d_{row['id']}"):
+                    supabase.table("produkty").delete().eq("id", row['id']).execute()
+                    st.rerun()
+    else:
+        st.warning("Baza jest pusta!")
