@@ -5,13 +5,14 @@ import altair as alt
 import streamlit.components.v1 as components
 
 # --- KONFIGURACJA POŁĄCZENIA ---
+# Dane pobierane z st.secrets
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(URL, KEY)
 
 st.set_page_config(page_title="Magazyn Pro + Games", layout="wide")
 
-# Funkcja do aktualizacji ilości w bazie
+# Funkcja pomocnicza do aktualizacji ilości w bazie
 def update_stock(product_id, new_count):
     if new_count >= 0:
         supabase.table("produkty").update({"liczba": new_count}).eq("id", product_id).execute()
@@ -19,6 +20,12 @@ def update_stock(product_id, new_count):
 
 # --- BOCZNE MENU ---
 st.sidebar.title("📦 Magazyn System")
+
+# DODATEK: Mapa Warszawy w boczny panelu
+st.sidebar.subheader("📍 Lokalizacja Magazynu")
+warszawa_coords = pd.DataFrame({'lat': [52.2297], 'lon': [21.0122]})
+st.sidebar.map(warszawa_coords, zoom=10)
+
 menu = ["Produkty & Dashboard", "Kategorie", "Przerwa na Snake'a", "Magazynier (Sokoban)"]
 choice = st.sidebar.selectbox("Nawigacja", menu)
 
@@ -83,7 +90,7 @@ elif choice == "Przerwa na Snake'a":
 # --- 3. SEKCJA SOKOBAN (Z RESETEM) ---
 elif choice == "Magazynier (Sokoban)":
     st.header("📦 Sokoban: Wyzwanie Logistyczne")
-    st.info("Jeśli zablokujesz skrzynię, użyj przycisku RESET pod grą.")
+    st.info("Jeśli zablokujesz skrzynię, użyj przycisku RESET poniżej.")
 
     sokoban_html = """
     <div style="display: flex; flex-direction: column; align-items: center;">
@@ -171,7 +178,7 @@ else:
         st.divider()
         with st.expander("➕ Dodaj produkt"):
             kat_res = supabase.table("kategorie").select("id, nazwa").execute()
-            kat_opcje = {k["nazwa"]: k["id"] for k in kat_res.data}
+            kat_opcje = {k["nazwa"]: k["id"] for k in (kat_res.data or [])}
             if kat_opcje:
                 n1, n2, n3 = st.columns(3)
                 name = n1.text_input("Nazwa")
@@ -184,14 +191,14 @@ else:
 
         for _, row in df.iterrows():
             with st.container():
-                c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
-                c1.write(f"**{row['nazwa']}**")
-                m, v, p = c2.columns([1,2,1])
+                col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                col1.write(f"**{row['nazwa']}**")
+                m, v, p = col2.columns([1,2,1])
                 if m.button("➖", key=f"m_{row['id']}"): update_stock(row['id'], row['liczba']-1)
                 v.write(f"{row['liczba']} szt.")
                 if p.button("➕", key=f"p_{row['id']}"): update_stock(row['id'], row['liczba']+1)
-                c3.write(f"{row['cena']:.2f} zł")
-                if c4.button("🗑️", key=f"d_{row['id']}"):
+                col3.write(f"{row['cena']:.2f} zł")
+                if col4.button("🗑️", key=f"d_{row['id']}"):
                     supabase.table("produkty").delete().eq("id", row['id']).execute()
                     st.rerun()
     else:
