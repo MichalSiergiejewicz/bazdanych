@@ -5,14 +5,13 @@ import altair as alt
 import streamlit.components.v1 as components
 
 # --- KONFIGURACJA POŁĄCZENIA ---
-# Dane pobierane z st.secrets
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(URL, KEY)
 
-st.set_page_config(page_title="Magazyn Pro + Games", layout="wide")
+st.set_page_config(page_title="Magazyn Pro + Zegar", layout="wide")
 
-# Funkcja pomocnicza do aktualizacji ilości w bazie
+# Funkcja pomocnicza do aktualizacji ilości
 def update_stock(product_id, new_count):
     if new_count >= 0:
         supabase.table("produkty").update({"liczba": new_count}).eq("id", product_id).execute()
@@ -21,13 +20,46 @@ def update_stock(product_id, new_count):
 # --- BOCZNE MENU ---
 st.sidebar.title("📦 Magazyn System")
 
-# DODATEK: Mapa Warszawy w boczny panelu
-st.sidebar.subheader("📍 Lokalizacja Magazynu")
+# 1. Mapa Warszawy
+st.sidebar.subheader("📍 Lokalizacja")
 warszawa_coords = pd.DataFrame({'lat': [52.2297], 'lon': [21.0122]})
-st.sidebar.map(warszawa_coords, zoom=10)
+st.sidebar.map(warszawa_coords, zoom=9)
 
+# 2. Nawigacja
 menu = ["Produkty & Dashboard", "Kategorie", "Przerwa na Snake'a", "Magazynier (Sokoban)"]
 choice = st.sidebar.selectbox("Nawigacja", menu)
+
+# 3. DUŻY ZEGAR (na dole sidebaru)
+st.sidebar.markdown("---")
+st.sidebar.subheader("🕒 Czas systemowy")
+clock_html = """
+<div id="clock" style="
+    background-color: #1f77b4; 
+    color: white; 
+    font-family: 'Courier New', Courier, monospace; 
+    font-size: 35px; 
+    font-weight: bold; 
+    text-align: center; 
+    padding: 15px; 
+    border-radius: 10px; 
+    border: 3px solid #0e1117;
+    box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
+">00:00:00</div>
+
+<script>
+function updateClock() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+    document.getElementById('clock').innerText = h + ":" + m + ":" + s;
+}
+setInterval(updateClock, 1000);
+updateClock();
+</script>
+"""
+with st.sidebar:
+    components.html(clock_html, height=100)
 
 # --- 1. SEKCJA KATEGORII ---
 if choice == "Kategorie":
@@ -54,7 +86,6 @@ elif choice == "Przerwa na Snake'a":
     snake_code = """
     <div style="display: flex; flex-direction: column; align-items: center;">
         <canvas id="gc" width="400" height="400" style="border:5px solid #1f77b4; background-image: url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=400&h=400&auto=format&fit=crop'); background-size: cover;"></canvas>
-        <p>Używaj strzałek. Zbieraj czerwone palety!</p>
     </div>
     <script>
     window.onload=function() {
@@ -85,34 +116,22 @@ elif choice == "Przerwa na Snake'a":
     }
     </script>
     """
-    components.html(snake_code, height=500)
+    components.html(snake_code, height=450)
 
-# --- 3. SEKCJA SOKOBAN (Z RESETEM) ---
+# --- 3. SEKCJA SOKOBAN ---
 elif choice == "Magazynier (Sokoban)":
     st.header("📦 Sokoban: Wyzwanie Logistyczne")
-    st.info("Jeśli zablokujesz skrzynię, użyj przycisku RESET poniżej.")
-
     sokoban_html = """
     <div style="display: flex; flex-direction: column; align-items: center;">
         <canvas id="sokoCanvas" width="400" height="320" style="border:3px solid #333; background: #eee;"></canvas>
         <br>
-        <button onclick="resetGame()" style="padding: 10px 20px; background: #1f77b4; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">🔄 RESETUJ POZIOM</button>
+        <button onclick="resetGame()" style="padding: 10px 20px; background: #1f77b4; color: white; border: none; border-radius: 5px; cursor: pointer;">🔄 RESETUJ POZIOM</button>
     </div>
     <script>
         const canvas = document.getElementById('sokoCanvas'); const ctx = canvas.getContext('2d'); const size = 40;
-        const initialMap = [
-            [1,1,1,1,1,1,1,1,1,1], [1,0,0,0,1,0,0,0,2,1], [1,0,3,0,0,0,3,0,0,1],
-            [1,0,2,1,1,1,0,0,0,1], [1,0,0,0,4,0,0,3,0,1], [1,1,1,0,0,0,1,1,0,1],
-            [1,2,0,0,3,0,0,0,0,1], [1,1,1,1,1,1,1,1,1,1]
-        ];
+        const initialMap = [[1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,0,0,0,2,1],[1,0,3,0,0,0,3,0,0,1],[1,0,2,1,1,1,0,0,0,1],[1,0,0,0,4,0,0,3,0,1],[1,1,1,0,0,0,1,1,0,1],[1,2,0,0,3,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]];
         let map, p;
-
-        function resetGame() {
-            map = JSON.parse(JSON.stringify(initialMap));
-            p = {x: 4, y: 4};
-            draw();
-        }
-
+        function resetGame() { map = JSON.parse(JSON.stringify(initialMap)); p = {x: 4, y: 4}; draw(); }
         function draw() {
             ctx.clearRect(0,0,400,320);
             for(let y=0; y<map.length; y++) {
@@ -126,13 +145,10 @@ elif choice == "Magazynier (Sokoban)":
                 }
             }
         }
-
         window.addEventListener('keydown', e => {
             let dx=0, dy=0;
             if(e.key === 'ArrowUp') dy=-1; if(e.key === 'ArrowDown') dy=1;
             if(e.key === 'ArrowLeft') dx=-1; if(e.key === 'ArrowRight') dx=1;
-            if(dx===0 && dy===0) return;
-            
             let nx = p.x + dx, ny = p.y + dy;
             if(map[ny][nx] === 0 || map[ny][nx] === 2) {
                 map[p.y][p.x] = (initialMap[p.y][p.x] === 2) ? 2 : 0;
@@ -150,7 +166,7 @@ elif choice == "Magazynier (Sokoban)":
         resetGame();
     </script>
     """
-    components.html(sokoban_html, height=480)
+    components.html(sokoban_html, height=450)
 
 # --- 4. SEKCJA PRODUKTY & DASHBOARD ---
 else:
@@ -202,4 +218,4 @@ else:
                     supabase.table("produkty").delete().eq("id", row['id']).execute()
                     st.rerun()
     else:
-        st.warning("Baza jest pusta. Dodaj kategorie i produkty!")
+        st.warning("Baza jest pusta!")
